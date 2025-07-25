@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>农场收支报表</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    /* ====== 样式 ====== */
+    body {
+      font-family: "Segoe UI", sans-serif;
+      padding: 20px;
+      max-width: 1400px;
+      margin: auto;
+      background: #f4f7f9;
+      color: #333;
+    }
+    h1 { text-align: center; margin-bottom: 30px; font-size: 24px; background:#fff; border-radius:10px; padding:6px 20px; box-shadow:0 1px 4px rgba(0,0,0,0.08); color:#34495e; display:inline-block;}
+    .form-section, .table-section { float:left; width:45%; margin-right:5%; }
+    .chart-section { float:left; width:50%; }
+    label { display:block; margin-top:12px; font-weight:600; color:#2c3e50; background:rgba(255,0,0,0.05); padding:4px 8px; border-radius:6px;}
+    input, select { width:100%; padding:8px; margin-top:4px; box-sizing:border-box; font-size:14px; border:1px solid #ccc; border-radius:10px; background-color:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.05);}
+    table { width:100%; border-collapse:collapse; margin-top:20px; font-size:14px; background-color:#fff; border-radius:10px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,0.05);}
+    th { background-color:#e6f2ff; color:#2c3e50; padding:10px;}
+    td { border:1px solid #eee; padding:8px; text-align:center;}
+    button { margin-top:12px; padding:10px 22px; font-size:14px; cursor:pointer; border:none; border-radius:24px; background:linear-gradient(135deg,#4facfe,#00f2fe); color:white; transition:background 0.3s ease; box-shadow:0 2px 6px rgba(0,0,0,0.1);}
+    button:hover { background:linear-gradient(135deg,#3fa4f4,#00e0f2);}
+    .summary-box { margin-top:15px; padding:12px; border-radius:10px; background:#f7f9fb; font-weight:bold; box-shadow:inset 0 1px 2px rgba(0,0,0,0.05); border:1px solid #dce3e8;}
+    .clear { clear:both; }
+    .chart-container { margin-top:0; background:#fff; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.1);}
+  </style>
+</head>
+<body>
+  <h1>📊 农场收支报表</h1>
+  <div class="form-section">
+    <form id="entryForm">
+      <label>📅 日期</label>
+      <input type="date" id="date" required />
+      <label>类型</label>
+      <select id="type">
+        <option value="收入">收入</option>
+        <option value="支出">支出</option>
+      </select>
+      <label>金额（缅币）</label>
+      <input type="number" id="amount" min="0" step="100" required />
+      <label>项目</label>
+      <input type="text" id="project" placeholder="如：饲料购买" />
+      <input type="hidden" id="editIndex" value="-1" />
+      <button type="submit">添加 / 保存记录</button>
+    </form>
+
+    <div class="summary-box">
+      💵 当前资金：<span id="currentBalance">0</span><br>
+      📈 当日收入：<span id="todayIncome">0</span><br>
+      📉 当日支出：<span id="todayExpense">0</span>
+    </div>
+  </div>
+
+  <div class="chart-section">
+    <div class="chart-container">
+      <h2 style="font-size:18px; margin-bottom:10px;">📈 收入与支出趋势图</h2>
+      <canvas id="trendChart" height="80"></canvas>
+    </div>
+  </div>
+
+  <div class="table-section" style="width:100%;">
+    <table id="dataTable">
+      <thead>
+        <tr>
+          <th>📅 日期</th>
+          <th>类型</th>
+          <th>金额</th>
+          <th>项目</th>
+          <th>备注</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    /* ====== JavaScript逻辑 ====== */
+    let data = JSON.parse(localStorage.getItem("farmRecords") || "[]");
+    const form = document.getElementById("entryForm");
+    const tableBody = document.querySelector("#dataTable tbody");
+    const currentBalanceSpan = document.getElementById("currentBalance");
+    const todayIncomeSpan = document.getElementById("todayIncome");
+    const todayExpenseSpan = document.getElementById("todayExpense");
+
+    function renderTable() {
+      tableBody.innerHTML = "";
+      const today = new Date().toISOString().split("T")[0];
+      let total = 0;
+      let todayIncome = 0;
+      let todayExpense = 0;
+
+      data.forEach((item, index) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${item.date}</td>
+          <td>${item.type}</td>
+          <td>${item.amount}</td>
+          <td>${item.project}</td>
+          <td>${item.remark || ''}</td>
+          <td><button onclick="editRecord(${index})">编辑</button></td>
+        `;
+        tableBody.appendChild(tr);
+        total += item.type === "收入" ? item.amount : -item.amount;
+        if (item.date === today) {
+          if (item.type === "收入") todayIncome += item.amount;
+          if (item.type === "支出") todayExpense += item.amount;
+        }
+      });
+
+      currentBalanceSpan.textContent = total.toLocaleString();
+      todayIncomeSpan.textContent = todayIncome.toLocaleString();
+      todayExpenseSpan.textContent = todayExpense.toLocaleString();
+      renderTrendChart();
+    }
+
+    function renderTrendChart() {
+      const ctx = document.getElementById('trendChart').getContext('2d');
+      const dates = [...new Set(data.map(i => i.date))].sort();
+      const incomeData = dates.map(date => data.filter(d => d.date === date && d.type === '收入').reduce((sum, d) => sum + d.amount, 0));
+      const expenseData = dates.map(date => data.filter(d => d.date === date && d.type === '支出').reduce((sum, d) => sum + d.amount, 0));
+
+      if (window.trendChart && typeof window.trendChart.destroy === 'function') {
+        window.trendChart.destroy();
+      }
+
+      window.trendChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: dates,
+          datasets: [
+            { label: '收入', data: incomeData, borderColor: 'green', backgroundColor: 'rgba(0,255,0,0.1)', tension: 0.4 },
+            { label: '支出', data: expenseData, borderColor: 'red', backgroundColor: 'rgba(255,0,0,0.1)', tension: 0.4 }
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { position: 'top' }, title: { display: false } },
+          scales: { y: { min: 100000, max: 90000000, ticks: { stepSize: 1000000 } } }
+        }
+      });
+    }
+
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      const date = document.getElementById("date").value;
+      const type = document.getElementById("type").value;
+      const amount = parseFloat(document.getElementById("amount").value);
+      const project = document.getElementById("project").value;
+      const editIndex = parseInt(document.getElementById("editIndex").value);
+      const record = { date, type, amount, project };
+
+      if (editIndex >= 0) {
+        data[editIndex] = record;
+        document.getElementById("editIndex").value = -1;
+      } else {
+        data.push(record);
+      }
+
+      localStorage.setItem("farmRecords", JSON.stringify(data));
+      form.reset();
+      renderTable();
+    });
+
+    function editRecord(index) {
+      const r = data[index];
+      document.getElementById("date").value = r.date;
+      document.getElementById("type").value = r.type;
+      document.getElementById("amount").value = r.amount;
+      document.getElementById("project").value = r.project;
+      document.getElementById("editIndex").value = index;
+    }
+
+    renderTable();
+  </script>
+</body>
+</html>
